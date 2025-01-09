@@ -69,32 +69,17 @@ class Go2Env:
         )
 
         assert self.franka.n_links == self.num_links
-        assert self.franka.n_dofs == self.num_actions
-
-        # add robot
-        # self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=self.device)
-        # self.base_init_quat = torch.tensor(self.env_cfg["base_init_quat"], device=self.device)
-        # self.inv_base_init_quat = inv_quat(self.base_init_quat)
-        # self.robot = self.scene.add_entity(
-        #     gs.morphs.URDF(
-        #         file="urdf/go2/urdf/go2.urdf",
-        #         pos=self.base_init_pos.cpu().numpy(),
-        #         quat=self.base_init_quat.cpu().numpy(),
-        #     ),
-        # )
+        if not env_cfg["cartesian_control"]:            
+            assert self.franka.n_dofs == self.num_actions
 
         # build
         self.scene.build(n_envs=num_envs)
 
-        # names to indices
-        self.motor_dofs = [self.franka.get_joint(name).dof_idx_local for name in self.env_cfg["dof_names"]]
-        # self.robot_motors_dof = np.arange(7)
-        # self.robot_fingers_dof = np.arange(7, 9)
-
-        # PD control parameters
-        # self.robot.set_dofs_kp([self.env_cfg["kp"]] * self.num_actions, self.motor_dofs)
-        # self.robot.set_dofs_kv([self.env_cfg["kd"]] * self.num_actions, self.motor_dofs)
-        # set control gains
+        self.arm_dofs = np.arange(7)
+        self.finger_dofs = np.arange(7, 9)
+        self.all_dofs = [self.franka.get_joint(name).dof_idx_local for name in self.env_cfg["dof_names"]]
+        
+        # Set control gains
         # Note: the following values are tuned for achieving best behavior with Franka
         # Typically, each new robot would have a different set of parameters.
         # Sometimes high-quality URDF or XML file would also provide this and will be parsed.
@@ -108,6 +93,8 @@ class Go2Env:
             np.array([-87, -87, -87, -87, -12, -12, -12, -100, -100]),
             np.array([ 87,  87,  87,  87,  12,  12,  12,  100,  100]),
         )
+
+        self.end_effector = self.franka.get_link('hand')
 
         # set to pre-grasp pose
         qpos = self.env_cfg["default_joint_angles"]
@@ -143,19 +130,13 @@ class Go2Env:
         self.last_actions = torch.zeros_like(self.actions)
 
         
-        self.dof_pos = torch.zeros_like(self.actions)
-        self.dof_vel = torch.zeros_like(self.actions)
-        self.dof_force = torch.zeros_like(self.actions)
+        self.dof_pos = torch.zeros((self.num_envs, self.franka.n_dofs), device=self.device, dtype=gs.tc_float)       
+        self.dof_vel = torch.zeros_like(self.dof_pos)
+        self.dof_force = torch.zeros_like(self.dof_pos)
 
-        self.last_dof_vel = torch.zeros_like(self.actions)
+        self.last_dof_vel = torch.zeros_like(self.dof_vel)        
 
-        #self.base_pos = torch.zeros((self.num_envs, 3), device=self.device, dtype=gs.tc_float)
-        #self.link_pos = torch.zeros((self.num_envs, self.num_links, 3), device=self.device, dtype=gs.tc_float)
-        #self.base_quat = torch.zeros((self.num_envs, 4), device=self.device, dtype=gs.tc_float)
-        #self.link_quat = torch.zeros((self.num_envs, self.num_links, 4), device=self.device, dtype=gs.tc_float)
-
-        self.default_dof_pos = torch.tensor(
-            #[self.env_cfg["default_joint_angles"][name] for name in self.env_cfg["dof_names"]],
+        self.default_dof_pos = torch.tensor(            
             self.env_cfg["default_joint_angles"],
             device=self.device,
             dtype=gs.tc_float,
@@ -165,9 +146,21 @@ class Go2Env:
     def step(self, actions):
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
-        target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
 
-        self.franka.control_dofs_position(target_dof_pos, self.motor_dofs)
+        if self.env_cfg["cartesian_control"]:
+            J = self.franka.get_jacobian(self.end_effector) # shape = [num_envs, 6, 9]
+            inv_J = torch.linalg.pinv(J)
+            end_effector_dof_vel = exec_actions[:, :-2] * self.env_cfg["action_scale"]            
+            joint_dof_vel = torch.bmm(inv_J, end_effector_dof_vel.unsqueeze(2)).squeeze(2)            
+            self.franka.control_dofs_velocity(joint_dof_vel[:,:-2], self.arm_dofs)
+
+            finger_force = exec_actions[:, -2:] * self.env_cfg["action_scale"]
+            self.franka.control_dofs_force(finger_force, self.finger_dofs)
+            
+        else:
+            target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
+            self.franka.control_dofs_position(target_dof_pos, self.all_dofs)
+
         self.scene.step()
 
         # update buffers
@@ -270,7 +263,7 @@ class Go2Env:
             )
         if self.obs_cfg["actions"]:
             obs_list.append(
-                self.actions.view(n, -1),                                                 # 9
+                self.actions.view(n, -1),                                                 
             )
 
         self.obs_buf[:] = torch.cat(obs_list, axis=-1)
@@ -296,7 +289,7 @@ class Go2Env:
         self.dof_force[envs_idx] = 0.0
         self.franka.set_dofs_position(
             position=self.dof_pos[envs_idx],
-            dofs_idx_local=self.motor_dofs,
+            dofs_idx_local=self.all_dofs,
             zero_velocity=True,
             envs_idx=envs_idx,
         )
@@ -360,7 +353,8 @@ class Go2Env:
         dist0 = torch.norm(self.finger_pos[:,0,:] - self.object_pos, dim=1)
         dist1 = torch.norm(self.finger_pos[:,1,:] - self.object_pos, dim=1)
         inv_dist = 0.01 / (dist0 + dist1 + 1e-10)        
-        return torch.maximum(inv_dist, self.reward_cfg["inv_dist_bound"] * torch.ones_like(inv_dist))
+        # print ("inv_dist reward=", inv_dist)
+        return torch.minimum(inv_dist, self.reward_cfg["inv_dist_bound"] * torch.ones_like(inv_dist))
     
     def _reward_finger_pressure(self):
         # TODO measure contact force at inside of finger

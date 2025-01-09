@@ -13,6 +13,61 @@ import genesis as gs
 USE_CUDA = torch.cuda.is_available()
 
 
+## Reward config
+reward_cfg= {
+    'target_height': 0.3,
+    'inv_dist_bound': 1.0,
+    'reward_scales': {
+        'lift_height': 1.0,
+        'obj_inv_dist': 1.0,
+        'finger_pressure': 0.0,
+        'action_rate': -0.0001, 
+    }
+}
+
+
+## Environment config
+env_cfg = {
+    'cartesian_control': True,
+    'num_links': 11,
+    'num_fingers': 2,
+    'default_joint_angles': [-1.0432,  1.4372,  1.5254, -1.7213, -1.4453,  1.6352,  1.4565, 0.04, 0.04],
+    'dof_names': [
+        'joint1',
+        'joint2',
+        'joint3',
+        'joint4',
+        'joint5',
+        'joint6',
+        'joint7',
+        'finger_joint1',
+        'finger_joint2',
+    ],
+    'link_names': [
+        'link0',
+        'link1',
+        'link2',
+        'link3',
+        'link4',
+        'link5',
+        'link6',
+        'link7',
+        'hand',
+        'left_finger',
+        'right_finger',
+    ],
+    'episode_length_s': 5.0, 
+    #'resampling_time_s': 4.0, 
+    'action_scale': 1.0, 
+    'simulate_action_latency': True, 
+    'clip_actions': 100.0
+}
+
+if env_cfg["cartesian_control"]:
+    env_cfg["num_actions"] = 8 # 6 dof of hand + 2 dof for fingers
+else:
+    env_cfg["num_actions"] = 9
+
 ## Observation config
 obs_cfg= {
     'reach_dir_and_dist': True,         # 3
@@ -23,7 +78,7 @@ obs_cfg= {
     'dof_pos': True,                    # 9
     'dof_vel': False,                   # 9
     'dof_force': False,                 # 9
-    'actions': True,                    # 9
+    'actions': True,                    # 9 or 6
     'obs_scales': {
         'lin_vel': 0.1,
         'ang_vel': 0.1, 
@@ -52,22 +107,10 @@ if obs_cfg["dof_vel"]:
 if obs_cfg["dof_force"]:
     num_obs += 9    
 if obs_cfg["actions"]:
-    num_obs += 9
+    num_obs += env_cfg["num_actions"]
 
 obs_cfg["num_obs"] = num_obs
 
-
-## Reward config
-reward_cfg= {
-    'target_height': 0.3,
-    'inv_dist_bound': 1.0,
-    'reward_scales': {
-        'lift_height': 1.0,
-        'obj_inv_dist': 1.0,
-        'finger_pressure': 0.0,
-        'action_rate': -0.0001, 
-    }
-}
 
 # Training config
 train_cfg= {
@@ -110,43 +153,6 @@ train_cfg= {
     }, 
     'runner_class_name': 'OnPolicyRunner', 
     'seed': 1
-}
-
-## Environment config
-env_cfg = {
-    'num_actions': 9,
-    'num_links': 11,
-    'num_fingers': 2,
-    'default_joint_angles': [-1.0432,  1.4372,  1.5254, -1.7213, -1.4453,  1.6352,  1.4565, 0.04, 0.04],
-    'dof_names': [
-        'joint1',
-        'joint2',
-        'joint3',
-        'joint4',
-        'joint5',
-        'joint6',
-        'joint7',
-        'finger_joint1',
-        'finger_joint2',
-    ],
-    'link_names': [
-        'link0',
-        'link1',
-        'link2',
-        'link3',
-        'link4',
-        'link5',
-        'link6',
-        'link7',
-        'hand',
-        'left_finger',
-        'right_finger',
-    ],
-    'episode_length_s': 5.0, 
-    #'resampling_time_s': 4.0, 
-    'action_scale': 1.0, 
-    'simulate_action_latency': True, 
-    'clip_actions': 100.0
 }
 
 
