@@ -4,16 +4,15 @@ import pickle
 import shutil
 import torch
 
+from go2_env import Go2Env
+
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
-from go2_env import Go2Env
-from rsl_rl.runners import OnPolicyRunner
-
+from runner import RunnerWithTB as Runner
 import genesis as gs
 
 USE_CUDA = torch.cuda.is_available()
-
 
 
 def get_train_cfg(exp_name, max_iterations):
@@ -28,9 +27,9 @@ def get_train_cfg(exp_name, max_iterations):
             "learning_rate": 0.001,
             "max_grad_norm": 1.0,
             "num_learning_epochs": 5,
-            "num_mini_batches": 4,
+            "num_mini_batches": 4,            
             "schedule": "adaptive",
-            "use_clipped_value_loss": True,
+            #"use_clipped_value_loss": True,
             "value_loss_coef": 1.0,
         },
         "init_member_classes": {},
@@ -147,13 +146,12 @@ def main():
     parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
-    args = parser.parse_args()
-
+    args = parser.parse_args()    
 
     if USE_CUDA:
         gs.init(logging_level="warning")
     else:
-        gs.init(backend=gs.cpu, logging_level="warning")        
+        gs.init(backend=gs.cpu, logging_level="warning")    
 
     log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
@@ -169,18 +167,17 @@ def main():
         device = "cpu"
 
     env = Go2Env(
-        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg,
-        device=device,
+        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, device=device
     )
 
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device=device)
+    runner = Runner(env, train_cfg, log_dir, device=device)
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg],
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    runner.learn(num_learning_iterations=args.max_iterations) #, init_at_random_ep_len=True)
 
 
 if __name__ == "__main__":
