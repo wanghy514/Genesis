@@ -1,3 +1,4 @@
+
 import torch
 import numpy as np
 import math
@@ -6,11 +7,16 @@ os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
 import genesis as gs
 from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
+from enum import Enum
 
+
+class ControlType(Enum):
+    DISCRETE = 0
+    CARTESIAN = 1
+    JOINT = 2
 
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
-
 
 class Go2Env:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, device, show_viewer=False):
@@ -69,7 +75,7 @@ class Go2Env:
         )
 
         assert self.franka.n_links == self.num_links
-        if not env_cfg["cartesian_control"]:            
+        if env_cfg["control_type"] == ControlType.JOINT:
             assert self.franka.n_dofs == self.num_actions
 
         # build
@@ -143,21 +149,88 @@ class Go2Env:
         )
         self.extras = dict()  # extra information for logging    
 
+
+        if self.env_cfg["control_type"] == ControlType.DISCRETE:
+            self.action_id_to_6dof_vec = torch.tensor([
+                [-1,0,0,0,0,0],
+                [1,0,0,0,0,0],
+                [0,-1,0,0,0,0],
+                [0,1,0,0,0,0],
+                [0,0,-1,0,0,0],
+                [0,0,1,0,0,0],
+                [0,0,0,-1,0,0],
+                [0,0,0,1,0,0],
+                [0,0,0,0,-1,0],
+                [0,0,0,0,1,0],
+                [0,0,0,0,0,-1],
+                [0,0,0,0,0,1],
+                [0,0,0,0,0,0],
+                [0,0,0,0,0,0],
+            ], device=self.device, dtype=gs.tc_float)
+
+            self.action_id_to_finger_force = torch.tensor([
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0,0],
+                [0.5, 0.5],
+                [-0.5, -0.5],
+            ], device=self.device, dtype=gs.tc_float)  
+
+
     def step(self, actions):
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
 
-        if self.env_cfg["cartesian_control"]:
+        if self.env_cfg["control_type"] == ControlType.DISCRETE:
+            
             J = self.franka.get_jacobian(self.end_effector) # shape = [num_envs, 6, 9]
             inv_J = torch.linalg.pinv(J)
-            end_effector_dof_vel = exec_actions[:, :-2] * self.env_cfg["action_scale"]            
+            action_logits = exec_actions[:, :-1]
+            action_id = torch.argmax(action_logits, dim=-1)
+            action_velocity = exec_actions[:, -1] * self.env_cfg["action_scale"]
+            action_velocity = torch.maximum(action_velocity, torch.zeros_like(action_velocity))
+
+            #print (self.action_id_to_6dof_vec.shape, action_id.shape, action_velocity.shape)
+            end_effector_dof_vel = torch.stack(
+                [
+                    self.action_id_to_6dof_vec[_id]
+                    for _id in action_id
+                ],
+            ) 
+            #print (end_effector_dof_vel.shape)
+            end_effector_dof_vel *= action_velocity.unsqueeze(1)
+
+            joint_dof_vel = torch.bmm(inv_J, end_effector_dof_vel.unsqueeze(2)).squeeze(2)            
+            finger_force = torch.stack(
+                [
+                    self.action_id_to_finger_force[_id]
+                    for _id in action_id
+                ],
+            )
+            self.franka.control_dofs_velocity(joint_dof_vel[:,:-2], self.arm_dofs)
+            self.franka.control_dofs_force(finger_force, self.finger_dofs)
+            
+            
+        elif self.env_cfg["control_type"] == ControlType.CARTESIAN:
+            J = self.franka.get_jacobian(self.end_effector) # shape = [num_envs, 6, 9]
+            inv_J = torch.linalg.pinv(J)
+            end_effector_dof_vel = exec_actions[:, :-2] * self.env_cfg["action_scale"]
             joint_dof_vel = torch.bmm(inv_J, end_effector_dof_vel.unsqueeze(2)).squeeze(2)            
             self.franka.control_dofs_velocity(joint_dof_vel[:,:-2], self.arm_dofs)
 
             finger_force = exec_actions[:, -2:] * self.env_cfg["action_scale"]
             self.franka.control_dofs_force(finger_force, self.finger_dofs)
             
-        else:
+        elif self.env_cfg["control_type"] == ControlType.JOINT:
             target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
             self.franka.control_dofs_position(target_dof_pos, self.all_dofs)
 
@@ -170,6 +243,10 @@ class Go2Env:
         links_quat = self.franka.get_links_quat()
         links_inv_quat = inv_quat(links_quat)
         self.finger_pos[:] = self.franka.get_links_pos()[:,-2:,:]
+
+        # apply z offset to get finger tip pos
+        self.finger_pos[:,:,-1] = self.finger_pos[:,:,-1] - 0.03
+
         
         self.links_lin_vel[:] = transform_by_quat(links_vel, links_inv_quat).view(
             self.num_envs, self.num_links, 3
@@ -217,7 +294,10 @@ class Go2Env:
         self.rew_buf[:] = 0.0        
         for name, reward_func in self.reward_functions.items():
             # print ("eval reward", name)
-            rew = reward_func() * self.reward_scales[name]
+            rew = reward_func()
+            if self.num_envs == 1:
+                print (f"add reward {name}: {rew}, scale {self.reward_scales[name]}")
+            rew *= self.reward_scales[name]
             self.rew_buf += rew
             self.episode_sums[name] += rew
 
@@ -228,7 +308,7 @@ class Go2Env:
         # print ("object_pos=", self.object_pos)
         # print ("finger_pos=", self.finger_pos)
 
-        if self.obs_cfg["reach_dir_and_dist"]:            
+        if self.obs_cfg["reach_dir_and_dist"]:
             obs_list.extend([
                self.object_pos - self.finger_pos[:,0,:],
                self.object_pos - self.finger_pos[:,1,:]
@@ -352,7 +432,9 @@ class Go2Env:
     def _reward_obj_inv_dist(self):        
         dist0 = torch.norm(self.finger_pos[:,0,:] - self.object_pos, dim=1)
         dist1 = torch.norm(self.finger_pos[:,1,:] - self.object_pos, dim=1)
-        inv_dist = 0.01 / (dist0 + dist1 + 1e-10)        
+        if self.num_envs == 1:
+            print (f"dist0={dist0}, dist1={dist1}")
+        inv_dist = 0.05 / (dist0 + dist1 + 1e-10)        
         # print ("inv_dist reward=", inv_dist)
         return torch.minimum(inv_dist, self.reward_cfg["inv_dist_bound"] * torch.ones_like(inv_dist))
     
@@ -362,3 +444,6 @@ class Go2Env:
         # print ("finger pressure reward=", reward)
         return reward
 
+    def _reward_similar_to_default(self):
+        # Penalize joint poses far away from default pose
+        return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1)

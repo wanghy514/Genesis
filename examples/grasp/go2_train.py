@@ -3,15 +3,15 @@ import os
 import pickle
 import shutil
 
+
 import torch
 
-from go2_env import Go2Env
+from go2_env import Go2Env, ControlType
 from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
 USE_CUDA = torch.cuda.is_available()
-
 
 ## Reward config
 reward_cfg= {
@@ -22,13 +22,14 @@ reward_cfg= {
         'obj_inv_dist': 1.0,
         'finger_pressure': 0.0,
         'action_rate': -0.0001, 
+        "similar_to_default": -0.1,
     }
 }
 
 
 ## Environment config
 env_cfg = {
-    'cartesian_control': True,
+    'control_type': ControlType.DISCRETE,
     'num_links': 11,
     'num_fingers': 2,
     'default_joint_angles': [-1.0432,  1.4372,  1.5254, -1.7213, -1.4453,  1.6352,  1.4565, 0.04, 0.04],
@@ -63,22 +64,24 @@ env_cfg = {
     'clip_actions': 100.0
 }
 
-if env_cfg["cartesian_control"]:
+if env_cfg["control_type"] == ControlType.DISCRETE:
+    env_cfg["num_actions"] = 15 # 6x2 move hand commands + 2 open/close gripper commands + 1 move hand velocity
+elif env_cfg["control_type"] == ControlType.CARTESIAN:
     env_cfg["num_actions"] = 8 # 6 dof of hand + 2 dof for fingers
-else:
+elif env_cfg["control_type"] == ControlType.JOINT:
     env_cfg["num_actions"] = 9
 
 ## Observation config
 obs_cfg= {
-    'reach_dir_and_dist': True,         # 3
-    'finger_contact_force': False,      # 2x3
+    'reach_dir_and_dist': True,         # 6
+    'finger_contact_force': True,      # 2x3
     'links_lin_vel': False,             # 11x3
     'links_ang_vel': False,             # 11x3
-    'links_projected_gravity': False,   # 11x3
+    'links_projected_gravity': True,   # 11x3
     'dof_pos': True,                    # 9
     'dof_vel': False,                   # 9
-    'dof_force': False,                 # 9
-    'actions': True,                    # 9 or 6
+    'dof_force': True,                 # 9
+    'actions': True,
     'obs_scales': {
         'lin_vel': 0.1,
         'ang_vel': 0.1, 
