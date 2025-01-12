@@ -42,8 +42,10 @@ class ResActorCritic(ActorCritic):
                         num_actions,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
-                        activation='elu',
+                        activation='elu',                        
                         init_noise_std=1.0,
+                        actor_shortcut=False,
+                        critic_shortcut=False,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -55,10 +57,10 @@ class ResActorCritic(ActorCritic):
         mlp_input_dim_c = num_critic_obs
 
         # Policy
-        self.actor = ResNet(mlp_input_dim_a, actor_hidden_dims, activation, num_actions, shortcut=True)
+        self.actor = ResNet(mlp_input_dim_a, actor_hidden_dims, activation, num_actions, shortcut=actor_shortcut)
 
         # Value function
-        self.critic = ResNet(mlp_input_dim_c, critic_hidden_dims, activation, 1, shortcut=False)
+        self.critic = ResNet(mlp_input_dim_c, critic_hidden_dims, activation, 1, shortcut=critic_shortcut)
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
