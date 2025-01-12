@@ -421,7 +421,7 @@ class Go2Env:
             envs_idx=envs_idx,
         )
         self.cube.set_quat(
-            random_quaternion(len(envs_idx)).to(self.device), 
+            torch.from_numpy(random_quaternion(len(envs_idx))).to(self.device),
             zero_velocity=True, 
             envs_idx=envs_idx,
         )
