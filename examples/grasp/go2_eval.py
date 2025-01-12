@@ -5,7 +5,8 @@ import pickle
 import numpy as np
 import torch
 from go2_env import Go2Env, ControlType
-from rsl_rl.runners import OnPolicyRunner
+#from rsl_rl.runners import OnPolicyRunner
+from runner import Runner
 
 import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'
@@ -90,7 +91,7 @@ def main():
         show_viewer=True,
     )
 
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device=device)
+    runner = Runner(env, train_cfg, log_dir, device=device)
     resume_path = os.path.join(log_dir, f"model_{args.ckpt}.pt")
 
     if args.teacher:

@@ -58,7 +58,7 @@ class ResActorCritic(ActorCritic):
         self.actor = ResNet(mlp_input_dim_a, actor_hidden_dims, activation, num_actions, shortcut=True)
 
         # Value function
-        self.critic = ResNet(mlp_input_dim_c, critic_hidden_dims, activation, 1, shortcut=False)        
+        self.critic = ResNet(mlp_input_dim_c, critic_hidden_dims, activation, 1, shortcut=False)
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")

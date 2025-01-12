@@ -6,7 +6,7 @@ import os
 os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
 import genesis as gs
-from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
+from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat, random_quaternion
 from enum import Enum
 
 
@@ -68,7 +68,7 @@ class Go2Env:
                 size = (0.04, 0.04, 0.04),
                 pos  = self.object_init_pos,
             )
-        )        
+        )
 
         self.franka = self.scene.add_entity(
             gs.morphs.MJCF(file='xml/franka_emika_panda/panda.xml'),
@@ -105,6 +105,8 @@ class Go2Env:
         # set to pre-grasp pose
         qpos = self.env_cfg["default_joint_angles"]
         self.franka.set_dofs_position(qpos)
+        self._resample_object_location(torch.arange(self.num_envs, device=self.device))        
+        
 
         # prepare reward functions and multiply reward scales by dt
         self.reward_functions, self.episode_sums = dict(), dict()
@@ -235,9 +237,11 @@ class Go2Env:
             self.franka.control_dofs_position(target_dof_pos, self.all_dofs)
 
         self.scene.step()
+        self.episode_length_buf += 1
+        
+        
 
         # update buffers
-        self.episode_length_buf += 1
         links_vel = self.franka.get_links_vel()
         links_ang = self.franka.get_links_ang()
         links_quat = self.franka.get_links_quat()
@@ -277,7 +281,7 @@ class Go2Env:
         self.dof_force[:] = self.franka.get_dofs_force()
 
         # Object
-        self.object_pos[:] = self.cube.get_pos()        
+        self.object_pos[:] = self.cube.get_pos()
 
         # check termination and reset
         self.reset_buf = self.episode_length_buf > self.max_episode_length
@@ -373,13 +377,7 @@ class Go2Env:
             zero_velocity=True,
             envs_idx=envs_idx,
         )
-        self.cube.set_pos(
-            torch.tensor(self.object_init_pos, device=self.device, dtype=gs.tc_float).repeat(
-                len(envs_idx), 1
-            ),
-            zero_velocity=True,
-            envs_idx=envs_idx,
-        )
+        self._resample_object_location(envs_idx)        
 
         # reset base
         self.links_ang_vel[envs_idx] = 0
@@ -408,7 +406,26 @@ class Go2Env:
             )
             self.episode_sums[key][envs_idx] = 0.0
 
-        #self._resample_commands(envs_idx) # TODO resample object location
+    def _resample_object_location(self, envs_idx):
+            
+        obj_pos = torch.tensor(self.object_init_pos, device=self.device, dtype=gs.tc_float).repeat(
+            len(envs_idx), 1
+        )
+        offset = torch.randn(len(envs_idx), 3)
+        offset[:,0] *= 0.01
+        offset[:,1] *= 0.1
+        offset[:,-1] = 0
+        self.cube.set_pos(
+            obj_pos + offset,
+            zero_velocity=True,
+            envs_idx=envs_idx,
+        )
+        self.cube.set_quat(
+            random_quaternion(len(envs_idx)), 
+            zero_velocity=True, 
+            envs_idx=envs_idx,
+        )
+
 
     def reset(self):
         self.reset_buf[:] = True

@@ -57,8 +57,7 @@ env_cfg = {
         'left_finger',
         'right_finger',
     ],
-    'episode_length_s': 5.0, 
-    #'resampling_time_s': 4.0, 
+    'episode_length_s': 5.0,     
     'action_scale': 1.0, 
     'simulate_action_latency': True, 
     'clip_actions': 100.0
