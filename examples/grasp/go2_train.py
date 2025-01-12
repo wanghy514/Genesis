@@ -7,7 +7,7 @@ import shutil
 import torch
 
 from go2_env import Go2Env, ControlType
-from rsl_rl.runners import OnPolicyRunner
+from runner import Runner
 
 import genesis as gs
 
@@ -146,7 +146,7 @@ train_cfg= {
         'log_interval': 1, 
         'max_iterations': 100, 
         'num_steps_per_env': 24, 
-        'policy_class_name': 'ActorCritic', 
+        'policy_class_name': 'ResActorCritic', 
         'record_interval': -1, 
         'resume': False, 
         'resume_path': None, 
@@ -154,7 +154,7 @@ train_cfg= {
         'runner_class_name': 'runner_class_name', 
         'save_interval': 100
     }, 
-    'runner_class_name': 'OnPolicyRunner', 
+    'runner_class_name': 'Runner', 
     'seed': 1
 }
 
@@ -199,7 +199,7 @@ def main():
     env = Go2Env(
         num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, device=device
     )    
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device=device)        
+    runner = Runner(env, train_cfg, log_dir, device=device)        
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, train_cfg],
