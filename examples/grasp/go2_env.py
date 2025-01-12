@@ -411,7 +411,7 @@ class Go2Env:
         obj_pos = torch.tensor(self.object_init_pos, device=self.device, dtype=gs.tc_float).repeat(
             len(envs_idx), 1
         )
-        offset = torch.randn(len(envs_idx), 3)
+        offset = torch.randn(len(envs_idx), 3).to(self.device)
         offset[:,0] *= 0.01
         offset[:,1] *= 0.1
         offset[:,-1] = 0
@@ -421,7 +421,7 @@ class Go2Env:
             envs_idx=envs_idx,
         )
         self.cube.set_quat(
-            random_quaternion(len(envs_idx)), 
+            random_quaternion(len(envs_idx)).to(self.device), 
             zero_velocity=True, 
             envs_idx=envs_idx,
         )
