@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 import torch
 from go2_env import Go2Env, ControlType
+from go2_train import workdir
 #from rsl_rl.runners import OnPolicyRunner
 from runner import Runner
 
@@ -13,7 +14,9 @@ os.environ['PYOPENGL_PLATFORM'] = 'glx'
 
 import genesis as gs
 
-if torch.cuda.is_available():
+USE_CUDA = torch.cuda.is_available()
+
+if USE_CUDA:
     device = 'cuda:0'
 else:
     device = 'cpu'
@@ -61,8 +64,8 @@ def teacher_policy(obs, env_cfg, obs_cfg):
 
     actions = torch.zeros(8)    
     actions[:3] += (obs_dict["reach_dir_and_dist"][0,:3] + obs_dict["reach_dir_and_dist"][0,3:])/2.0
-    print (obs_dict)
-    print ("actions=", actions)
+    # print (obs_dict)
+    # print ("actions=", actions)
     
     return actions
 
@@ -74,9 +77,13 @@ def main():
     parser.add_argument("--teacher", action='store_true')
     args = parser.parse_args()
 
-    gs.init(backend=gs.cpu)
+    
+    if USE_CUDA:
+        gs.init()
+    else:
+        gs.init(backend=gs.cpu)
 
-    log_dir = f"logs/{args.exp_name}"
+    log_dir = os.path.join(workdir, f"{args.exp_name}")
     print ("log_dir=", log_dir)    
     env_cfg, obs_cfg, reward_cfg, train_cfg = pickle.load(open(f"logs/{args.exp_name}/cfgs.pkl", "rb"))
     # reward_cfg["reward_scales"] = {}
@@ -110,7 +117,7 @@ def main():
                 actions = get_random_action(env_cfg)
                 
         
-            obs, _, rews, dones, infos = env.step(actions)
+            obs, rews, dones, infos = env.step(actions)
             print ("rewards=", rews)
 
 

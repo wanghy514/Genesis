@@ -2,11 +2,17 @@ import argparse
 import os
 import pickle
 import shutil
+import torch
 
 from go2_env import Go2Env
-from rsl_rl.runners import OnPolicyRunner
+# from rsl_rl.runners import OnPolicyRunner
+from rsl_rl.runners.legacy_runner import LeggedGymRunner as OnPolicyRunner
+
+
 
 import genesis as gs
+
+USE_CUDA = torch.cuda.is_available()
 
 
 def get_train_cfg(exp_name, max_iterations):
@@ -142,7 +148,10 @@ def main():
     parser.add_argument("--max_iterations", type=int, default=100)
     args = parser.parse_args()
 
-    gs.init(logging_level="warning")
+    if USE_CUDA:
+        gs.init(logging_level="warning")
+    else:
+        gs.init(backend=gs.cpu, logging_level="warning")    
 
     log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
@@ -152,11 +161,16 @@ def main():
         shutil.rmtree(log_dir)
     os.makedirs(log_dir, exist_ok=True)
 
+    if USE_CUDA:
+        device = "cuda:0"
+    else:
+        device = "cpu"
+
     env = Go2Env(
-        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg
+        num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, device=device
     )
 
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device="cuda:0")
+    runner = OnPolicyRunner(env, train_cfg, log_dir, device=device)
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg],

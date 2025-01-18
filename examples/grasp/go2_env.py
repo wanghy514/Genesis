@@ -13,13 +13,17 @@ from enum import Enum
 class ControlType(Enum):
     DISCRETE = 0
     CARTESIAN = 1
-    JOINT = 2
+    JOINT_POS = 2
+    JOINT_VEL = 3
+    JOINT_FORCE = 4
+
+CUBE_SIZE = 0.04
 
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
 
 class Go2Env:
-    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, device, show_viewer=False):
+    def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, device, show_viewer=False, show_pinch_pos=False):
         self.device = torch.device(device)
 
         self.num_envs = num_envs
@@ -39,6 +43,7 @@ class Go2Env:
 
         self.obs_scales = obs_cfg["obs_scales"]
         self.reward_scales = reward_cfg["reward_scales"]
+        self.show_pinch_pos = show_pinch_pos
 
         # create scene
         self.scene = gs.Scene(
@@ -62,20 +67,28 @@ class Go2Env:
         # add plain
         self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
 
-        self.object_init_pos = (0.65, 0.0, 0.02)
+        self.object_init_pos = (0.6, 0.0, CUBE_SIZE/2.0)
         self.cube = self.scene.add_entity(
             gs.morphs.Box(
-                size = (0.04, 0.04, 0.04),
+                size = (CUBE_SIZE, CUBE_SIZE, CUBE_SIZE),
                 pos  = self.object_init_pos,
             )
         )
+        if self.show_pinch_pos:
+            self.pinch_cube = self.scene.add_entity(
+                gs.morphs.Box(
+                    size = (0.01, 0.01, 0.01),
+                    pos  = (0.65, 0.0, 0.05),
+                    fixed = True,
+                )
+            )
 
         self.franka = self.scene.add_entity(
             gs.morphs.MJCF(file='xml/franka_emika_panda/panda.xml'),
         )
 
         assert self.franka.n_links == self.num_links
-        if env_cfg["control_type"] == ControlType.JOINT:
+        if env_cfg["control_type"] in [ControlType.JOINT_POS, ControlType.JOINT_VEL, ControlType.JOINT_FORCE]:
             assert self.franka.n_dofs == self.num_actions
 
         # build
@@ -232,9 +245,17 @@ class Go2Env:
             finger_force = exec_actions[:, -2:] * self.env_cfg["action_scale"]
             self.franka.control_dofs_force(finger_force, self.finger_dofs)
             
-        elif self.env_cfg["control_type"] == ControlType.JOINT:
+        elif self.env_cfg["control_type"] == ControlType.JOINT_POS:
             target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
             self.franka.control_dofs_position(target_dof_pos, self.all_dofs)
+        
+        elif self.env_cfg["control_type"] == ControlType.JOINT_VEL:
+            target_dof_vel = exec_actions * self.env_cfg["action_scale"]
+            self.franka.control_dofs_velocity(target_dof_vel, self.all_dofs)
+
+        elif self.env_cfg["control_type"] == ControlType.JOINT_FORCE:
+            target_dof_force = exec_actions * self.env_cfg["action_scale"]
+            self.franka.control_dofs_force(target_dof_force, self.all_dofs)            
 
         self.scene.step()
         self.episode_length_buf += 1
@@ -247,9 +268,14 @@ class Go2Env:
         links_quat = self.franka.get_links_quat()
         links_inv_quat = inv_quat(links_quat)
         self.finger_pos[:] = self.franka.get_links_pos()[:,-2:,:]
+        self.finger_pos[:,:,-1] = self.finger_pos[:,:,-1] - 0.045
+        self.pinch_pos = torch.mean(self.finger_pos, dim=1)
+        self.pinch_pos[:, -1] = self.pinch_pos[:, -1]
 
-        # apply z offset to get finger tip pos
-        self.finger_pos[:,:,-1] = self.finger_pos[:,:,-1] - 0.03
+        if self.show_pinch_pos:
+            self.pinch_cube.set_pos(
+                self.pinch_pos, zero_velocity=True, envs_idx=torch.arange(self.num_envs, device=self.device)
+            )
 
         
         self.links_lin_vel[:] = transform_by_quat(links_vel, links_inv_quat).view(
@@ -307,10 +333,7 @@ class Go2Env:
 
         # compute observations
         n = self.num_envs
-        obs_list = []
-        
-        # print ("object_pos=", self.object_pos)
-        # print ("finger_pos=", self.finger_pos)
+        obs_list = []        
 
         if self.obs_cfg["reach_dir_and_dist"]:
             obs_list.extend([
@@ -355,10 +378,10 @@ class Go2Env:
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:] # not used?
 
-        return self.obs_buf, None, self.rew_buf, self.reset_buf, self.extras
+        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def get_observations(self):
-        return self.obs_buf
+        return self.obs_buf, self.extras
 
     def get_privileged_observations(self):
         return None
@@ -441,19 +464,19 @@ class Go2Env:
         return reward
 
     def _reward_lift_height(self):
-        object_height = self.object_pos[:,2]
-        reward = torch.minimum(object_height, self.reward_cfg["target_height"] * torch.ones_like(object_height))
-        # print ("lift height reward=", reward)
-        return reward 
+        object_height = self.object_pos[:,2] - CUBE_SIZE/2.0
+        reward = object_height / self.reward_cfg["target_height"]
+        reward = torch.minimum(reward,  torch.ones_like(reward))
+        return reward
     
-    def _reward_obj_inv_dist(self):        
-        dist0 = torch.norm(self.finger_pos[:,0,:] - self.object_pos, dim=1)
-        dist1 = torch.norm(self.finger_pos[:,1,:] - self.object_pos, dim=1)
+    def _reward_obj_dist(self):                
+        dist = torch.norm(self.pinch_pos - self.object_pos, dim=1)
+        dist_reward = torch.maximum(1.0 - 5 * dist, torch.zeros_like(dist))
         if self.num_envs == 1:
-            print (f"dist0={dist0}, dist1={dist1}")
-        inv_dist = 0.05 / (dist0 + dist1 + 1e-10)        
-        # print ("inv_dist reward=", inv_dist)
-        return torch.minimum(inv_dist, self.reward_cfg["inv_dist_bound"] * torch.ones_like(inv_dist))
+            print (f"dist={dist}")
+            print ("dist reward=", dist_reward)
+        
+        return dist_reward
     
     def _reward_finger_pressure(self):
         # TODO measure contact force at inside of finger

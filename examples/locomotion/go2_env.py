@@ -1,5 +1,9 @@
 import torch
 import math
+
+import os
+os.environ['PYOPENGL_PLATFORM'] = 'glx'
+
 import genesis as gs
 from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
 
@@ -180,10 +184,11 @@ class Go2Env:
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
 
-        return self.obs_buf, None, self.rew_buf, self.reset_buf, self.extras
+        #return self.obs_buf, None, self.rew_buf, self.reset_buf, self.extras
+        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def get_observations(self):
-        return self.obs_buf
+        return self.obs_buf, self.extras
 
     def get_privileged_observations(self):
         return None
