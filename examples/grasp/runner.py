@@ -80,10 +80,11 @@ class RunnerWithTB(LeggedGymRunner):
     def __init__(self,
             env: VecEnv,
             train_cfg,
-            log_dir=None,
-            device='cpu'):
+            log_dir=None,            
+            **kwargs,
+        ):
         
-        super().__init__(env, train_cfg, log_dir=log_dir, device=device)
+        super().__init__(env, train_cfg, log_dir=log_dir, **kwargs)
         
         self._learn_cb.append(RunnerWithTB.tb_log)
 

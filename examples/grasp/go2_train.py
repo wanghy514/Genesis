@@ -7,6 +7,7 @@ import datetime
 import torch
 
 from go2_env import Go2Env, ControlType, NUM_ACTIONS_OF_CTRL_TYPE, get_num_obs
+from teacher import teacher_policy
 
 import genesis as gs
 from runner import RunnerWithTB as Runner
@@ -104,7 +105,7 @@ def get_cfgs(args):
         'algorithm': {            
             'gamma': 0.99,                         
             'num_learning_epochs': args.epochs, 
-            'num_mini_batches': 4,
+            'num_mini_batches': args.num_batches,
             'use_clipped_value_loss': True,             
         }, 
         'init_member_classes': {}, 
@@ -166,11 +167,13 @@ def parse_args():
     default_exp_name = f"grasp_{now}"
     parser.add_argument("-e", "--exp_name", type=str, default=default_exp_name)
     parser.add_argument("-a", "--alg_name", type=str, default="PPO")
-    parser.add_argument("-B", "--num_envs", type=int, default=4096)    
+    parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=100)
+    parser.add_argument("--num_batches", type=int, default=16)
     parser.add_argument("--num_steps_per_env", type=int, default=256)
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--control_type", type=int, default=0)
+    parser.add_argument("--epochs", type=int, default=4)
+    parser.add_argument("--control_type", type=int, default=2)
+    parser.add_argument("--teacher", action='store_true')
     parser.add_argument("--verbose", default=False, action='store_true')
     # parser.add_argument("--actor_shortcut", default=False, action='store_true')
     # parser.add_argument("--critic_shortcut", default=False, action='store_true')
@@ -200,7 +203,22 @@ def main():
     env = Go2Env(
         num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, device=device, verbose=args.verbose,        
     )    
-    runner = Runner(env, train_cfg, log_dir, device=device)        
+
+    if args.teacher:
+        teacher = lambda obs : teacher_policy(
+            env.franka, 
+            env.end_effector, 
+            env.default_dof_pos, 
+            env.episode_length_buf,
+            obs, 
+            env_cfg, 
+            obs_cfg,
+            device,
+        )
+    else:
+        teacher = None
+
+    runner = Runner(env, train_cfg, log_dir, teacher=teacher, device=device)        
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, train_cfg],

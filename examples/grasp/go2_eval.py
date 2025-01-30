@@ -87,7 +87,8 @@ def main():
             env.episode_length_buf,
             obs, 
             env_cfg, 
-            obs_cfg
+            obs_cfg,
+            device,
         )
     elif os.path.isfile(resume_path):
         runner.load(resume_path)

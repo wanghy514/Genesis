@@ -48,7 +48,8 @@ def teacher_policy(
         episode_length_buf, 
         obs, 
         env_cfg, 
-        obs_cfg
+        obs_cfg,
+        device,
     ):    
 
     warm_up_steps = 20
@@ -56,11 +57,12 @@ def teacher_policy(
 
     assert env_cfg["control_type"] == ControlType.JOINT_POS
 
-    step_cnt = episode_length_buf[0]
+    step_cnt = episode_length_buf[0].cpu().item()
     assert torch.all(episode_length_buf == step_cnt)
 
     num_envs = len(episode_length_buf)
-    actions = torch.zeros(num_envs, 9)    
+
+    actions = torch.zeros(num_envs, 9).to(device)
     
     # for batch_idx in range(num_envs):
         
