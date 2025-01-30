@@ -89,7 +89,7 @@ class Go2Env:
                 camera_lookat=(0.0, 0.0, 0.5),
                 camera_fov=40,
             ),
-            vis_options=gs.options.VisOptions(n_rendered_envs=1),
+            vis_options=gs.options.VisOptions(n_rendered_envs=self.num_envs),
             rigid_options=gs.options.RigidOptions(
                 dt=self.dt,
                 constraint_solver=gs.constraint_solver.Newton,
